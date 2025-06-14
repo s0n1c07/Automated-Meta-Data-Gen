@@ -8,3 +8,6 @@ spacy
 sentence-transformers
 scikit-learn
 rake-nltk
+Pillow
+torch
+torchvision
