@@ -1,0 +1,10 @@
+streamlit
+PyMuPDF
+easyocr
+pdf2image
+python-docx
+nltk
+spacy
+sentence-transformers
+scikit-learn
+rake-nltk
