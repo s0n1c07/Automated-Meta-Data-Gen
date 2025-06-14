@@ -1,11 +1,11 @@
 streamlit
 PyMuPDF
-easyocr==1.6.2
+easyocr
 pdf2image
 python-docx
 nltk
 spacy
-sentence-transformers==2.2.2
+sentence-transformers
 scikit-learn
 rake-nltk
 Pillow
