@@ -13,3 +13,4 @@ torch
 torchvision
 langdetect
 pytz
+poppler-utils  # required for pdf2image
