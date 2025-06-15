@@ -1,8 +1,9 @@
 import streamlit as st
-from generate import generate_metadata
+
 
 st.set_page_config(page_title="Automated Metadata Generator")
-st.set_page_config(page_title="Automated Metadata Generator")
+# st.set_page_config(page_title="Automated Metadata Generator")
+from generate import generate_metadata
 st.title("📄 Automated Metadata Generator")
 
 uploaded_file = st.file_uploader(
