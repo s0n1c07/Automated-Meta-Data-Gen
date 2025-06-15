@@ -29,8 +29,8 @@ reader = easyocr.Reader(['en'], gpu=False)
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 
-# sentencemodel = SentenceTransformer('all-MiniLM-L6-v2')
-SentenceTransformer("paraphrase-albert-small-v2")
+sentencemodel = SentenceTransformer('all-MiniLM-L6-v2')
+# SentenceTransformer("paraphrase-albert-small-v2")
 
 def extract_text(path: str) -> str:
     ext = path.lower().split('.')[-1]
