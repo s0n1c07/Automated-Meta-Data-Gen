@@ -9,8 +9,6 @@ sentence-transformers
 scikit-learn
 rake-nltk
 Pillow
-torch
-torchvision
 langdetect
 pytz
 poppler-utils  # required for pdf2image
