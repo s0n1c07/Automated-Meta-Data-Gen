@@ -11,3 +11,5 @@ rake-nltk
 Pillow
 torch
 torchvision
+langdetect
+pytz

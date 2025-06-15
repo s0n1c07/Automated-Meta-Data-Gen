@@ -1,16 +1,16 @@
 import io
 import fitz                        # PyMuPDF for fast PDF text
-import easyocr                     # OCR
-from pdf2image import convert_from_bytes
+import easyocr                    # OCR
 from docx import Document
 from pathlib import Path
-import json
 from datetime import datetime
+from PIL import Image
+import numpy as np
 
-# ——————————————————————————————————————————————
-# 1) Ensure spaCy model is available at runtime
+# spaCy and NLTK setup
 import spacy
 from spacy.cli import download as spacy_download
+import nltk
 
 try:
     nlp = spacy.load("en_core_web_sm")
@@ -18,21 +18,18 @@ except OSError:
     spacy_download("en_core_web_sm")
     nlp = spacy.load("en_core_web_sm")
 
-# 2) Ensure NLTK corpora for RAKE
-import nltk
 nltk.download('punkt', quiet=True)
 nltk.download('stopwords', quiet=True)
+nltk.download('punkt_tab', quiet=True)
 
-# 3) Pre-load SentenceTransformers and EasyOCR models
+# EasyOCR
+reader = easyocr.Reader(['en'], gpu=False)
+
+# Semantic similarity
 from sentence_transformers import SentenceTransformer
-_ = SentenceTransformer('all-MiniLM-L6-v2')  # caches the model
+from sklearn.metrics.pairwise import cosine_similarity
 
-reader = easyocr.Reader(['en'], gpu=False)   # caches OCR model
-
-# 4) Initialize RAKE now that NLTK data is present
-from rake_nltk import Rake
-rake = Rake()
-# ——————————————————————————————————————————————
+sentencemodel = SentenceTransformer('all-MiniLM-L6-v2')
 
 
 def extract_text(path: str) -> str:
@@ -40,45 +37,44 @@ def extract_text(path: str) -> str:
     if ext == 'txt':
         return Path(path).read_text(encoding='utf-8')
 
+        return Path(path).read_text(encoding='utf-8')
+
     if ext == 'docx':
         doc = Document(path)
         return "\n".join(p.text for p in doc.paragraphs)
+
 
     if ext == 'pdf':
         pdf = fitz.open(path)
         text = "".join(page.get_text() for page in pdf)
 
-        # fallback to OCR if text too short
         if len(text.strip()) < 50:
-            pdf_bytes = Path(path).read_bytes()
-            images = convert_from_bytes(pdf_bytes)
             text = ""
-            for img in images:
-                page_text = reader.readtext(img, detail=0, paragraph=True)
-                text += "\n".join(page_text) + "\n\n"
+            for page in pdf:
+                pix = page.get_pixmap(matrix=fitz.Matrix(2, 2), colorspace=fitz.csRGB)
+                img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+                img_array = np.array(img)
+                page_text = reader.readtext(img_array, detail=0, paragraph=True)
+                text += "\n".join(str(seg) for seg in page_text) + "\n\n"
         return text
+
 
     raise ValueError(f"Unsupported file type: {ext}")
 
 
-def semantic_sections(raw_text: str, top_n: int = 5):
-    # delayed import so encode only when needed
-    from sklearn.metrics.pairwise import cosine_similarity
-
-    docs = [sent for sent in raw_text.split('\n') if len(sent) > 20]
-    embeddings = SentenceTransformer('all-MiniLM-L6-v2').encode(docs)
+def semantic_sections(raw_text: str, top_n: int = 5) -> list[str]:
+    docs = [sent.text.strip() for sent in nlp(raw_text).sents if len(sent.text.strip()) > 20]
+    embeddings = sentencemodel.encode(docs)
     avg_emb = embeddings.mean(axis=0, keepdims=True)
     sims = cosine_similarity(embeddings, avg_emb).flatten()
     idx = sims.argsort()[-top_n:][::-1]
     return [docs[i] for i in idx]
 
 
-def extract_keywords(raw_text: str, max_words: int = 20):
-    rake.extract_keywords_from_text(raw_text)
-    return [kw for kw, _ in rake.get_ranked_phrases_with_scores()[:max_words]]
+def generate_metadata(path: str) -> str:
+    from langdetect import detect
+    from pytz import timezone
 
-
-def generate_metadata(path: str) -> dict:
     p = Path(path)
     try:
         # 1. Extract text
@@ -86,31 +82,44 @@ def generate_metadata(path: str) -> dict:
 
         # 2. Semantic summary & keywords
         summary_sections = semantic_sections(text, top_n=3)
-        keywords = extract_keywords(text, max_words=15)
 
-        # 3. Named‐entity extraction via spaCy
-        doc = nlp(text[:500])
-        entities = {
-            ent.label_: list({e.text for e in doc.ents if e.label_ == ent.label_})
-            for ent in doc.ents
-        }
+        doc = nlp(text[:1000])
+        entities_map: dict[str, set[str]] = {}
+        for ent in doc.ents:
+            entities_map.setdefault(ent.label_, set()).add(ent.text)
+        entities = {label: sorted([str(v) for v in vals]) for label, vals in entities_map.items()}
 
-        # 4. Build metadata dict
-        meta = {
-            "filename": p.name,
-            "extracted_on": datetime.utcnow().isoformat() + "Z",
-            "length_chars": len(text),
-            "summary_sections": summary_sections,
-            "keywords": keywords,
-            "entities": entities,
-        }
+        # Meta analysis
+        language = detect(text)
+        paragraphs = [p for p in text.split('\n') if p.strip()]
+        doc_length = len(text)
+        word_count = len(text.split())
+        reading_time = word_count // 200 + 1
+        dominant_entity = max(entities.items(), key=lambda x: len(x[1]))[0] if entities else "N/A"
 
-        # 5. Write out sidecar JSON
-        out_path = p.with_name(p.stem + "_meta.json")
-        with out_path.open("w", encoding="utf-8") as f:
-            json.dump(meta, f, indent=2)
+        # Assemble report
+        lines: list[str] = []
+        lines.append(f"Filename: {p.name}")
+        lines.append(f"Extracted on: {datetime.now(timezone('Asia/Kolkata')).strftime('%Y-%m-%d %H:%M:%S IST')}")
+        lines.append(f"Document length: {doc_length} characters")
+        lines.append(f"Word count: {word_count}")
+        lines.append(f"Approx. Reading Time: {reading_time} min")
+        lines.append(f"Paragraphs: {len(paragraphs)}")
+        lines.append(f"Detected Language: {language.upper()}")
+        lines.append(f"Dominant Entity Type: {dominant_entity}")
 
-        return meta
+        lines.append("\n=== Summary Sections ===")
+        for i, sec in enumerate(summary_sections, 1):
+            snippet = str(sec).strip().replace("\n", " ")
+            if len(snippet) > 200:
+                snippet = snippet[:197].rsplit(" ", 1)[0] + "..."
+            lines.append(f"{i}. {snippet}")
+
+        lines.append("\n=== Named Entities ===")
+        for label, vals in entities.items():
+            lines.append(f"{label}: {', '.join(vals)}")
+
+        return "\n".join(lines)
 
     except Exception as e:
-        return {"filename": p.name, "error": str(e)}
+        return f"Error processing {p.name}:\n{str(e)}"
